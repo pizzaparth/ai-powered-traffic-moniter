@@ -81,8 +81,10 @@ function CountdownBoard({ x, phase }) {
 
   useFrame(() => {
     const controller = simulation.engine.controller
-    const seconds = Math.min(99, Math.max(0, Math.ceil(controller.countdown(phase))))
-    board.draw(String(seconds), BOARD_COLORS[controller.signalFor(phase)])
+    const left = controller.countdown(phase)
+    // Blank while the junction is empty and no change is coming.
+    const text = left === null ? '' : String(Math.min(99, Math.max(0, Math.ceil(left))))
+    board.draw(text, BOARD_COLORS[controller.signalFor(phase)])
   })
 
   return (

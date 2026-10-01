@@ -1,5 +1,7 @@
 import { SimulationEngine } from './engine.js'
-import { useLogStore, useSettingsStore, useSimStore } from './store.js'
+import { useLogStore, useSimStore } from './store.js'
+import { DEFAULT_TIMING } from './config.js'
+import { onTick } from './clock.js'
 
 // One simulation for the whole app. It keeps running while you look at the
 // activity or hardware tabs. When the 3D view is open it drives the clock
@@ -7,15 +9,12 @@ import { useLogStore, useSettingsStore, useSimStore } from './store.js'
 
 const STEP = 1 / 60
 const MAX_FRAME = 0.1
+const HIDDEN_MAX_FRAME = 1 // worker ticks are ~0.2 s apart, more if the tab is busy
 const PUBLISH_EVERY = 0.12
 
 const engine = new SimulationEngine({
-  timing: useSettingsStore.getState().timing,
+  timing: DEFAULT_TIMING,
   log: (entry) => useLogStore.getState().add(entry),
-})
-
-useSettingsStore.subscribe((state, previous) => {
-  if (state.timing !== previous.timing) engine.setTiming(state.timing)
 })
 
 const carIds = () => [...engine.cars.values()].map((car) => ({ id: car.id, type: car.type }))
@@ -34,10 +33,10 @@ function publish() {
   })
 }
 
-function advance(realDelta) {
+function advance(realDelta, maxFrame = MAX_FRAME) {
   const { paused, speed } = useSimStore.getState()
   if (paused) return
-  accumulator += Math.min(realDelta, MAX_FRAME) * speed
+  accumulator += Math.min(realDelta, maxFrame) * speed
   while (accumulator >= STEP) {
     engine.step(STEP)
     accumulator -= STEP
@@ -49,16 +48,27 @@ function advance(realDelta) {
   }
 }
 
-// Background clock, used whenever no 3D view is mounted.
+// Visible tab: this frame loop drives the clock whenever no 3D view is
+// mounted (the 3D view drives it from its own render loop).
 let rendererAttached = 0
 let last = performance.now()
 function loop(now) {
   const delta = (now - last) / 1000
   last = now
-  if (!rendererAttached) advance(delta)
+  if (!rendererAttached && !document.hidden) advance(delta)
   requestAnimationFrame(loop)
 }
 requestAnimationFrame(loop)
+
+// Hidden tab: frame loops stop, so the worker clock keeps simulated time in
+// step with real time. The board keeps copying a live simulation.
+let lastHidden = performance.now()
+onTick(() => {
+  const now = performance.now()
+  const delta = (now - lastHidden) / 1000
+  lastHidden = now
+  if (document.hidden) advance(delta, HIDDEN_MAX_FRAME)
+})
 
 const userLog = (kind, message) => engine.log('user', kind, message)
 

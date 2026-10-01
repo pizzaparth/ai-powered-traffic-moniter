@@ -3,57 +3,29 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Cable, RefreshCw, RotateCcw, Save, Send, Unplug, Wand2 } from 'lucide-react'
-import { DEFAULT_TIMING } from '../simulation/config.js'
 import { DEFAULT_HARDWARE, useSettingsStore } from '../simulation/store.js'
 import { simulation } from '../simulation/runtime.js'
-import { APPROACHES, BOARD, boardCountdowns } from '../hardware/board.js'
+import { APPROACHES, BOARD, boardSignals } from '../hardware/board.js'
+import { PHASES } from '../simulation/config.js'
 import { adaptiveTimings, connect, disconnect, send, sendTimings, useBoardStore } from '../hardware/serial.js'
 
-const seconds = (min, max) =>
-  z.number({ error: 'Enter a number' }).min(min, `At least ${min} s`).max(max, `At most ${max} s`)
 const green = z
   .number({ error: 'Enter a number' })
   .int('Whole seconds only')
   .min(BOARD.minGreen, `At least ${BOARD.minGreen} s`)
   .max(BOARD.maxGreen, `At most ${BOARD.maxGreen} s`)
 
-const schema = z
-  .object({
-    hardware: z.object({
-      greens: z.object(Object.fromEntries(APPROACHES.map((approach) => [approach.key, green]))),
-      autoSync: z.boolean(),
-      syncEvery: z.number(),
-    }),
-    timing: z.object({
-      gMin: seconds(5, 20),
-      gMax: seconds(20, 60),
-      yellow: seconds(3, 6),
-      allRed: seconds(1, 3),
-      gapThreshold: seconds(1, 5),
-      extendStep: seconds(1, 10),
-      wMax: seconds(30, 300),
-    }),
-  })
-  .refine((value) => value.timing.gMax > value.timing.gMin, {
-    path: ['timing', 'gMax'],
-    message: 'Must be longer than minimum green',
-  })
+const schema = z.object({
+  hardware: z.object({
+    greens: z.object(Object.fromEntries(PHASES.map((phase) => [phase.id, green]))),
+  }),
+})
 
-const TIMING_FIELDS = [
-  { name: 'gMin', label: 'Minimum green' },
-  { name: 'gMax', label: 'Maximum green' },
-  { name: 'yellow', label: 'Yellow' },
-  { name: 'allRed', label: 'All red' },
-  { name: 'gapThreshold', label: 'Gap-out after' },
-  { name: 'extendStep', label: 'Extend by' },
-  { name: 'wMax', label: 'Longest allowed wait' },
-]
-
-const SYNC_OPTIONS = [5, 10, 15, 30]
 const LIGHT_LABEL = { green: 'Green', yellow: 'Yellow', red: 'Red' }
 
-const pick = (timing) => Object.fromEntries(TIMING_FIELDS.map(({ name }) => [name, timing[name]]))
-const toArray = (greens) => APPROACHES.map((approach) => greens[approach.key])
+const LIGHT_NAME = { G: 'green', Y: 'yellow', R: 'red' }
+
+const toArray = (greens) => PHASES.map((phase) => greens[phase.id])
 
 function Field({ label, error, children }) {
   return (
@@ -130,16 +102,52 @@ function ConnectionCard() {
   )
 }
 
+// What the board shows: the frames we stream while it copies the
+// simulation, or its own cycle worked out from its PHASE reports.
+function boardLights({ mode, frame, phase, timings }, now) {
+  if (mode === 'follow' && frame) {
+    return APPROACHES.map((approach) => ({
+      light: LIGHT_NAME[frame.lights[approach.index]],
+      seconds: frame.counts[approach.index],
+    }))
+  }
+  return boardSignals(phase, timings, now)
+}
+
 function LiveLights() {
-  const { status, phase, timings } = useBoardStore()
-  const now = useNow(Boolean(phase))
-  const elapsed = phase ? Math.floor((now - phase.at) / 1000) : 0
-  const waits = boardCountdowns(phase, timings, elapsed)
+  const board = useBoardStore()
+  const mirror = useSettingsStore((state) => state.hardware.mirror)
+  const setMirror = useSettingsStore((state) => state.setMirror)
+  const now = useNow(Boolean(board.phase))
+  const lights = boardLights(board, now)
+  const { status } = board
+
+  const toggleMirror = (event) => {
+    setMirror(event.target.checked)
+    simulation.engine.log(
+      'user',
+      'mirror',
+      event.target.checked
+        ? 'Board set to copy the simulation signals.'
+        : 'Board set to run its own cycle. It switches back within 3 s.',
+    )
+  }
 
   return (
     <section className="card">
-      <h2 className="card-title">Lights on the board</h2>
-      {!waits ? (
+      <h2 className="card-title">
+        Lights on the board
+        {board.mode && (
+          <span className={`pill ${board.mode === 'follow' ? 'pill-green' : 'pill-ink'}`}>
+            {board.mode === 'follow' ? 'Copying simulation' : 'Own cycle'}
+          </span>
+        )}
+      </h2>
+      <label className="check toggle-row">
+        <input type="checkbox" checked={mirror} onChange={toggleMirror} />
+        Copy the simulation signals live
+      </label>
+      {!lights ? (
         <p className="card-note">
           {status === 'connected'
             ? 'No report yet. Upload the updated sketch so the board reports its lights.'
@@ -148,13 +156,13 @@ function LiveLights() {
       ) : (
         <ul className="lane-rows">
           {APPROACHES.map((approach) => {
-            const light = approach.index === phase.lane ? phase.mode : 'red'
+            const { light, seconds } = lights[approach.index]
             return (
               <li key={approach.key}>
                 <span>{approach.label}</span>
                 <span className="row-end">
                   <span className={`pill pill-${light}`}>{LIGHT_LABEL[light]}</span>
-                  <strong className="row-count">{waits[approach.index]} s</strong>
+                  <strong className="row-count">{seconds === '-' ? 'No timer' : `${seconds} s`}</strong>
                 </span>
               </li>
             )
@@ -204,7 +212,7 @@ function Wiring() {
 }
 
 export default function Hardware() {
-  const { timing, hardware, save, reset } = useSettingsStore()
+  const { hardware, save, reset } = useSettingsStore()
   const { status, lastAck } = useBoardStore()
   const connected = status === 'connected'
   const [savedAt, setSavedAt] = useState(null)
@@ -217,31 +225,31 @@ export default function Hardware() {
     formState: { errors, isDirty },
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { hardware, timing: pick(timing) },
+    defaultValues: { hardware: { greens: hardware.greens } },
   })
 
   const log = (kind, message) => simulation.engine.log('user', kind, message)
 
   const onSave = (values) => {
-    save({ hardware: values.hardware, timing: { ...timing, ...values.timing } })
+    save({ hardware: values.hardware })
     resetForm(values)
     setSavedAt(new Date())
-    log('hardware', 'Saved the board settings and signal timing.')
+    log('hardware', 'Saved the board green times.')
   }
 
   const onSend = (values) => sendTimings(toArray(values.hardware.greens)).catch(() => {})
 
   const fillFromSimulation = () => {
     adaptiveTimings().forEach((value, index) => {
-      setValue(`hardware.greens.${APPROACHES[index].key}`, value, { shouldDirty: true, shouldValidate: true })
+      setValue(`hardware.greens.${PHASES[index].id}`, value, { shouldDirty: true, shouldValidate: true })
     })
   }
 
   const onReset = () => {
     reset()
-    resetForm({ hardware: DEFAULT_HARDWARE, timing: pick(DEFAULT_TIMING) })
+    resetForm({ hardware: { greens: DEFAULT_HARDWARE.greens } })
     setSavedAt(null)
-    log('hardware', 'Reset board settings and signal timing to defaults.')
+    log('hardware', 'Reset the board green times to defaults.')
   }
 
   const number = { valueAsNumber: true }
@@ -251,7 +259,7 @@ export default function Hardware() {
       <header className="page-head">
         <div>
           <h1 className="page-title">Hardware</h1>
-          <p className="page-lede">An {BOARD.name} on USB runs the lights and countdowns. This page sends it green times.</p>
+          <p className="page-lede">An {BOARD.name} on USB runs the lights and countdowns. It can copy the simulation signals live.</p>
         </div>
         <span className={`pill ${connected ? 'pill-green' : 'pill-ink'}`}>
           {connected ? <Cable size={16} strokeWidth={2.5} /> : <Unplug size={16} strokeWidth={2.5} />}
@@ -267,28 +275,16 @@ export default function Hardware() {
           <section className="card card-wide">
             <h2 className="card-title">Green times</h2>
             <p className="card-note">
-              The board runs North, East, South, West in turn, with {BOARD.yellow} s of yellow. Each green lasts{' '}
-              {BOARD.minGreen} to {BOARD.maxGreen} s.
+              Used when the board runs its own cycle: Road 1 (North and South), then Road 2 (East and West), with{' '}
+              {BOARD.yellow} s of yellow and {BOARD.allRed} s of all red between. Each green {BOARD.minGreen} to{' '}
+              {BOARD.maxGreen} s.
             </p>
             <div className="fields">
-              {APPROACHES.map((approach) => (
-                <Field key={approach.key} label={`${approach.label} green`} error={errors.hardware?.greens?.[approach.key]}>
-                  <input type="number" step="1" inputMode="numeric" {...register(`hardware.greens.${approach.key}`, number)} />
+              {PHASES.map((phase) => (
+                <Field key={phase.id} label={`${phase.name} green`} error={errors.hardware?.greens?.[phase.id]}>
+                  <input type="number" step="1" inputMode="numeric" {...register(`hardware.greens.${phase.id}`, number)} />
                 </Field>
               ))}
-            </div>
-            <div className="sync-row">
-              <label className="check">
-                <input type="checkbox" {...register('hardware.autoSync')} />
-                Send adaptive green times from the simulation every
-              </label>
-              <select aria-label="Send interval" {...register('hardware.syncEvery', number)}>
-                {SYNC_OPTIONS.map((value) => (
-                  <option key={value} value={value}>
-                    {value} s
-                  </option>
-                ))}
-              </select>
             </div>
             <div className="card-actions">
               <span className="card-status" role="status">
@@ -307,18 +303,6 @@ export default function Hardware() {
                 <Send size={16} strokeWidth={2.5} />
                 Send to board
               </button>
-            </div>
-          </section>
-
-          <section className="card card-wide">
-            <h2 className="card-title">Signal timing</h2>
-            <p className="card-note">Seconds. Used by the simulation and for the green times sent to the board.</p>
-            <div className="fields">
-              {TIMING_FIELDS.map((field) => (
-                <Field key={field.name} label={field.label} error={errors.timing?.[field.name]}>
-                  <input type="number" step="0.5" inputMode="decimal" {...register(`timing.${field.name}`, number)} />
-                </Field>
-              ))}
             </div>
           </section>
 

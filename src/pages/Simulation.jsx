@@ -2,7 +2,7 @@ import { Suspense, lazy, useRef } from 'react'
 import { useProgress } from '@react-three/drei'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Maximize2, Pause, Play, Square, Trash2 } from 'lucide-react'
-import { LANES, LANE_BY_ID, LANE_CAP, ROADS } from '../simulation/config.js'
+import { LANES, LANE_CAP } from '../simulation/config.js'
 import { simulation } from '../simulation/runtime.js'
 import { useSimStore } from '../simulation/store.js'
 import { HOME_VIEW, TOP_VIEW } from '../simulation/three/views.js'
@@ -75,35 +75,39 @@ function Controls() {
   )
 }
 
-function RoadCard({ road }) {
-  const lanes = useSimStore((state) => state.lanes).filter((lane) => lane.id.startsWith(road.id))
-  const signal = lanes[0]?.signal ?? 'red'
-  const countdown = Math.max(0, Math.ceil(lanes[0]?.countdown ?? 0))
+// One signal per lane, the same four lights and countdowns the board shows.
+function LaneSignal({ lane }) {
+  const view = useSimStore((state) => state.lanes.find((item) => item.id === lane.id))
+  const signal = view?.signal ?? 'red'
+  const left = view?.countdown
+  const noTimer = left === null || left === undefined
+  const seconds = noTimer ? null : Math.max(0, Math.ceil(left))
+  const Icon = HEADING_ICON[lane.heading]
+  const count = view?.count ?? 0
   return (
-    <section className="card" aria-label={`${road.name} signal`}>
-      <h2 className="card-title">
-        {road.name}
-        <span className="pill pill-ink">{road.axis}</span>
-      </h2>
-      <div className="signal-row">
+    <section className="card lane-signal" aria-label={`${lane.label} signal`}>
+      <div className="lane-signal-info">
+        <h2 className="lane-signal-title">
+          <Icon size={18} strokeWidth={3} aria-hidden="true" />
+          {lane.label}
+        </h2>
+        <p className="lane-signal-meta">
+          {lane.direction}. {count} {count === 1 ? 'car' : 'cars'}, {view?.queue ?? 0} stopped
+        </p>
+      </div>
+      <div className="lane-signal-state">
         <span className={`pill pill-${signal}`}>{SIGNAL_LABEL[signal]}</span>
-        <span className="countdown" aria-label={`${countdown} seconds until change`}>
-          {countdown}
-          <small>s</small>
+        <span className="countdown" aria-label={noTimer ? 'No change scheduled' : `${seconds} seconds until change`}>
+          {noTimer ? (
+            <small>No timer</small>
+          ) : (
+            <>
+              {seconds}
+              <small>s</small>
+            </>
+          )}
         </span>
       </div>
-      <ul className="lane-rows">
-        {lanes.map((lane) => (
-          <li key={lane.id}>
-            <span>
-              Lane {LANE_BY_ID[lane.id].index} {LANE_BY_ID[lane.id].direction.toLowerCase()}
-            </span>
-            <span>
-              {lane.count} {lane.count === 1 ? 'car' : 'cars'}, {lane.queue} stopped
-            </span>
-          </li>
-        ))}
-      </ul>
     </section>
   )
 }
@@ -160,8 +164,8 @@ export default function Simulation() {
         </div>
 
         <aside className="status">
-          {ROADS.map((road) => (
-            <RoadCard key={road.id} road={road} />
+          {LANES.map((lane) => (
+            <LaneSignal key={lane.id} lane={lane} />
           ))}
         </aside>
       </div>

@@ -44,10 +44,6 @@ export class SimulationEngine {
     this.controller.startGreen(0, this.sense())
   }
 
-  setTiming(timing) {
-    this.controller.setTiming(timing)
-  }
-
   onCarsChange(listener) {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)

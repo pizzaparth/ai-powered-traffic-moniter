@@ -27,13 +27,10 @@ export class AdaptiveController {
     this.lastCrossingAt = PHASES.map(() => 0)
     this.crossings = [] // { time, phase }
     this.holding = false
+    this.idle = false
     this.extendedUntil = 0
     this.latestScores = null
     this.now = 0
-  }
-
-  setTiming(timing) {
-    this.timing = timing
   }
 
   // §12 Green -> Yellow -> All red -> Green.
@@ -41,6 +38,9 @@ export class AdaptiveController {
     this.now = now
     this.modeTime += dt
     const t = this.timing
+    // Empty junction: no car anywhere, so no change is coming and the
+    // countdown boards go blank.
+    this.idle = this.mode === 'green' && Object.values(sense).every((lane) => lane.cars === 0)
 
     if (this.mode === 'green') {
       this.greenTime += dt
@@ -136,9 +136,13 @@ export class AdaptiveController {
     // §7 Minimum green.
     if (this.greenTime < t.gMin) return
 
-    // Nobody is waiting elsewhere: rest on green instead of cycling.
+    // Nobody is waiting elsewhere: rest on green instead of cycling. Keep the
+    // planned green long enough to clear this road's queue so its countdown
+    // stays meaningful.
     if (other.cars === 0) {
-      if (this.planned - this.greenTime < 1) this.planned = this.greenTime + t.extendStep
+      if (this.planned - this.greenTime < 1) {
+        this.planned = this.greenTime + Math.max(t.extendStep, current.predicted / t.dischargeRate)
+      }
       if (!this.holding) {
         this.holding = true
         this.log('algorithm', 'hold', `${name} stays green. No cars on ${otherName}.`)
@@ -243,8 +247,10 @@ export class AdaptiveController {
     return 'red'
   }
 
-  // Seconds until this phase's signal changes, for the countdown boards.
+  // Seconds until this phase's signal changes, for the countdown boards, or
+  // null while the junction is empty and no change is scheduled.
   countdown(phaseIndex) {
+    if (this.idle) return null
     const t = this.timing
     const greenLeft = Math.max(0, this.planned - this.greenTime)
     if (phaseIndex === this.phase) {
