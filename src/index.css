@@ -28,8 +28,11 @@ body,
   background: var(--black);
 }
 
-body {
-  overflow: hidden;
+html.light,
+html.light body,
+html.light #root {
+  background: var(--white);
+  color-scheme: light;
 }
 
 a {
