@@ -709,6 +709,91 @@
   font-weight: 800;
 }
 
+/* Board facts, actions and live lights on the hardware tab. */
+.facts {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--paper);
+}
+
+.facts dt {
+  font-weight: 800;
+}
+
+.facts dd {
+  margin: 0;
+  font-weight: 700;
+  text-align: right;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.card-status {
+  margin-right: auto;
+  font-weight: 800;
+}
+
+.sync-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  font-weight: 800;
+}
+
+.sync-row select {
+  height: 40px;
+  padding: 0 12px;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--ink);
+}
+
+.row-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.row-count {
+  min-width: 3.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 1100px) {
   .sim-grid {
     grid-template-columns: 1fr;

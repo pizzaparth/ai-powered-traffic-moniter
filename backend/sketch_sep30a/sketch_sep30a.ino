@@ -33,6 +33,19 @@ PhaseType currentPhase = PHASE_GREEN;
 int countdown = 10;
 unsigned long lastTick = 0;
 
+// --- Serial link ---
+// Commands (one per line, 115200 baud over USB):
+//   <T0,T1,T2,T3>  green seconds for North, East, South, West (5-60)
+//   ?              report the current state and timings
+// Reports sent back to the web app:
+//   READY,UNO_R4_MINIMA,4        after start-up
+//   PHASE,<lane>,<GREEN|YELLOW>,<seconds>   whenever the lights change
+//   TIMINGS,<T0>,<T1>,<T2>,<T3>   after timings are applied or on request
+//   ERR,<reason>                  when a command is not understood
+const int SERIAL_BUFFER = 48;
+char serialBuffer[SERIAL_BUFFER];
+int serialLength = 0;
+
 // --- Helper Functions ---
 
 void setLightState(int lane, int r, int y, int g) {
@@ -93,32 +106,80 @@ int getWaitTime(int laneIndex) {
   return wait;
 }
 
-// Check Serial for incoming timing string: "<T0,T1,T2,T3>"
+void reportPhase() {
+  Serial.print("PHASE,");
+  Serial.print(activeLane);
+  Serial.print(currentPhase == PHASE_GREEN ? ",GREEN," : ",YELLOW,");
+  Serial.println(countdown);
+}
+
+void reportTimings() {
+  Serial.print("TIMINGS");
+  for (int i = 0; i < 4; i++) {
+    Serial.print(',');
+    Serial.print(greenDurations[i]);
+  }
+  Serial.println();
+}
+
+// Apply a timing packet "<T0,T1,T2,T3>" (brackets already present).
+void applyTimings(String packet) {
+  packet = packet.substring(1, packet.length() - 1);
+  int parsed[4];
+  int idx = 0;
+  int startIdx = 0;
+
+  for (int i = 0; i <= (int)packet.length(); i++) {
+    if (i == (int)packet.length() || packet.charAt(i) == ',') {
+      if (idx < 4) {
+        parsed[idx++] = packet.substring(startIdx, i).toInt();
+      } else {
+        idx++;
+      }
+      startIdx = i + 1;
+    }
+  }
+
+  if (idx == 4) {
+    for (int i = 0; i < 4; i++) {
+      greenDurations[i] = constrain(parsed[i], 5, 60); // Bound between 5s and 60s
+    }
+    Serial.println("ACK: Dynamic Timings Applied");
+    reportTimings();
+  } else {
+    Serial.println("ERR,Expected four values like <10,10,10,10>");
+  }
+}
+
+void handleCommand(String line) {
+  line.trim();
+  if (line.length() == 0) return;
+  if (line == "?") {
+    reportPhase();
+    reportTimings();
+  } else if (line.startsWith("<") && line.endsWith(">")) {
+    applyTimings(line);
+  } else {
+    Serial.println("ERR,Unknown command");
+  }
+}
+
+// Read serial without blocking, so the multiplexed displays never stall
+// while a command is still arriving.
 void readSerialTimings() {
-  if (Serial.available()) {
-    String packet = Serial.readStringUntil('\n');
-    packet.trim();
-    if (packet.startsWith("<") && packet.endsWith(">")) {
-      packet = packet.substring(1, packet.length() - 1);
-      int parsed[4];
-      int idx = 0;
-      int startIdx = 0;
-
-      for (int i = 0; i <= packet.length(); i++) {
-        if (i == packet.length() || packet.charAt(i) == ',') {
-          if (idx < 4) {
-            parsed[idx++] = packet.substring(startIdx, i).toInt();
-            startIdx = i + 1;
-          }
-        }
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (serialLength > 0) {
+        serialBuffer[serialLength] = '\0';
+        handleCommand(String(serialBuffer));
+        serialLength = 0;
       }
-
-      if (idx == 4) {
-        for (int i = 0; i < 4; i++) {
-          greenDurations[i] = constrain(parsed[i], 5, 60); // Bound between 5s and 60s
-        }
-        Serial.println("ACK: Dynamic Timings Applied");
-      }
+    } else if (serialLength < SERIAL_BUFFER - 1) {
+      serialBuffer[serialLength++] = c;
+    } else {
+      serialLength = 0; // Overlong line: drop it
+      Serial.println("ERR,Line too long");
     }
   }
 }
@@ -140,6 +201,10 @@ void setup() {
 
   countdown = greenDurations[activeLane];
   updateTrafficSignals();
+
+  Serial.println("READY,UNO_R4_MINIMA,4");
+  reportTimings();
+  reportPhase();
 }
 
 void loop() {
@@ -160,6 +225,7 @@ void loop() {
         countdown = greenDurations[activeLane];
       }
       updateTrafficSignals();
+      reportPhase();
     }
   }
 

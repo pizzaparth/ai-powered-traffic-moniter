@@ -114,6 +114,15 @@ export class AdaptiveController {
     return Math.min(t.gMax, Math.max(t.gMin, required))
   }
 
+  // Green seconds for one approach on its own, for hardware that runs each
+  // approach in turn. Same §14 rule, clamped to the board's 5–60 s range.
+  laneGreen(lane) {
+    const t = this.timing
+    const predicted = lane.queue + lane.arrivalRate * t.horizon
+    const required = t.startupLoss + predicted / t.dischargeRate
+    return Math.round(Math.min(Math.min(60, t.gMax), Math.max(Math.max(5, t.gMin), required)))
+  }
+
   // §18 decision flow, run every half second while a phase is green.
   decide(sense) {
     const t = this.timing

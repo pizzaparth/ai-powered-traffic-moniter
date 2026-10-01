@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { DEFAULT_TIMING, LANES } from './config.js'
+import { DEFAULT_TIMING } from './config.js'
 
 const LOG_LIMIT = 2000
 let logId = 0
 
-// Every action by the algorithm, the user or the system.
+// Every action by the algorithm, the user or the board.
 export const useLogStore = create((set) => ({
   entries: [],
   add: (entry) =>
@@ -16,14 +16,12 @@ export const useLogStore = create((set) => ({
   clear: () => set({ entries: [] }),
 }))
 
+// Board link settings. Green times are per approach in the sketch's order:
+// North, East, South, West.
 export const DEFAULT_HARDWARE = {
-  board: 'esp32',
-  connection: 'wifi-mqtt',
-  address: 'mqtt://192.168.1.50:1883',
-  sensors: Object.fromEntries(LANES.map((lane, index) => [lane.id, { type: 'camera', input: `CAM${index + 1}` }])),
-  outputs: Object.fromEntries(
-    LANES.map((lane, index) => [lane.id, { red: 12 + index * 3, amber: 13 + index * 3, green: 14 + index * 3 }]),
-  ),
+  greens: { north: 10, east: 10, south: 10, west: 10 },
+  autoSync: false,
+  syncEvery: 5,
 }
 
 // Saved in this browser so the configuration survives reloads.
@@ -35,7 +33,12 @@ export const useSettingsStore = create(
       save: ({ timing, hardware }) => set({ timing: { ...DEFAULT_TIMING, ...timing }, hardware }),
       reset: () => set({ timing: DEFAULT_TIMING, hardware: DEFAULT_HARDWARE }),
     }),
-    { name: 'traffic-settings', version: 1 },
+    {
+      name: 'traffic-settings',
+      version: 2,
+      // Version 1 described a Wi-Fi board with cameras; keep only the timing.
+      migrate: (saved) => ({ timing: { ...DEFAULT_TIMING, ...saved?.timing }, hardware: DEFAULT_HARDWARE }),
+    },
   ),
 )
 

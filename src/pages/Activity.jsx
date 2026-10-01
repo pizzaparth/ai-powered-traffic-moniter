@@ -7,12 +7,14 @@ import { DecisionCard, Totals } from '../simulation/ui/Insights.jsx'
 const SOURCES = {
   algorithm: { label: 'Algorithm', pill: 'pill-ink' },
   user: { label: 'You', pill: 'pill-blue' },
+  board: { label: 'Board', pill: 'pill-green' },
 }
 
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'algorithm', label: 'Algorithm' },
   { id: 'user', label: 'You' },
+  { id: 'board', label: 'Board' },
 ]
 
 const ROW_HEIGHT = 68
@@ -56,7 +58,7 @@ export default function Activity() {
   }, [entries, filter])
 
   const counts = useMemo(() => {
-    const result = { all: entries.length, algorithm: 0, user: 0 }
+    const result = { all: entries.length, algorithm: 0, user: 0, board: 0 }
     for (const entry of entries) result[entry.source] = (result[entry.source] ?? 0) + 1
     return result
   }, [entries])
@@ -74,7 +76,7 @@ export default function Activity() {
       <header className="page-head">
         <div>
           <h1 className="page-title">Activity</h1>
-          <p className="page-lede">Every signal decision and every action you take, newest first.</p>
+          <p className="page-lede">Every signal decision, every action you take and every board message, newest first.</p>
         </div>
       </header>
 
