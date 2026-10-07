@@ -71,14 +71,16 @@ int serialLength = 0;
 
 // --- Helper Functions ---
 
-void setLightState(int lane, int r, int y, int g) {
-  digitalWrite(L_RED[lane],    r);
-  digitalWrite(L_YELLOW[lane], y);
-  digitalWrite(L_GREEN[lane],  g);
-}
-
+// Exactly one lamp per approach is ever lit. Lamps are switched off before
+// the new one comes on, so two never glow together even for a moment
+// (for example red and amber when amber changes to red).
 void setLight(int lane, char light) {
-  setLightState(lane, light == 'R' ? HIGH : LOW, light == 'Y' ? HIGH : LOW, light == 'G' ? HIGH : LOW);
+  if (light != 'R') digitalWrite(L_RED[lane], LOW);
+  if (light != 'Y') digitalWrite(L_YELLOW[lane], LOW);
+  if (light != 'G') digitalWrite(L_GREEN[lane], LOW);
+  if (light == 'R') digitalWrite(L_RED[lane], HIGH);
+  else if (light == 'Y') digitalWrite(L_YELLOW[lane], HIGH);
+  else if (light == 'G') digitalWrite(L_GREEN[lane], HIGH);
 }
 
 void writeShiftRegister(int rclkPin, byte segments, byte digitPos) {
