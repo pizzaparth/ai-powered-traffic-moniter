@@ -14,7 +14,7 @@ export const ROAD_Y = 0.1 // top of the lane paint, where tyres sit
 export const LANE_CAP = 8
 export const MIN_GAP = 1.6 // bumper-to-bumper gap when queued
 export const BRAKE = 6 // m/s², comfortable braking
-export const TURN_SPEED = 5 // m/s through a turn
+export const TURN_SPEED = 3.5 // m/s through a turn
 
 export const ROADS = [
   { id: 'r1', name: 'Road 1', axis: 'North-south' },
@@ -40,27 +40,30 @@ export const LANES = [
 
 export const LANE_BY_ID = Object.fromEntries(LANES.map((lane) => [lane.id, lane]))
 
-// A phase is a set of lanes that share green: both directions of one road
-// (§2, phases 1 and 2). Left turns are permissive and give way to oncoming
-// traffic, so the conflicting turn phases are not needed.
-export const PHASES = [
-  { id: 'p1', road: 'r1', name: 'Road 1', directions: 'north and south', lanes: ['r1l1', 'r1l2'] },
-  { id: 'p2', road: 'r2', name: 'Road 2', directions: 'east and west', lanes: ['r2l1', 'r2l2'] },
-]
+// A phase is the set of lanes that share green. Each approach gets green on
+// its own, in turn clockwise from the north: North, East, South, West.
+// Only one approach moves at a time, so nothing crosses its path and every
+// car that sees green can go. Order matches the board's approach numbers.
+const APPROACH_ORDER = ['north', 'east', 'south', 'west']
+export const PHASES = APPROACH_ORDER.map((from, index) => {
+  const lane = LANES.find((item) => item.from === from)
+  return { id: `p${index + 1}`, road: lane.road, name: lane.label, from, directions: lane.direction.toLowerCase(), lanes: [lane.id] }
+})
 
-// Each car type arrives on its own rhythm (seconds between arrivals) and
-// drives at its own cruising speed.
+// Each car type arrives on its own rhythm (seconds between arrivals, spaced
+// so signals serving one approach at a time keep up) and drives at its own
+// cruising speed (m/s): roughly 20-28 km/h, town traffic.
 export const CAR_TYPES = {
-  sedan: { label: 'Sedan', every: [7, 15], speed: 10 },
-  hatchback: { label: 'Hatchback', every: [8, 19], speed: 9.5 },
-  compact: { label: 'Compact', every: [12, 24], speed: 9 },
-  suv: { label: 'SUV', every: [14, 27], speed: 9.5 },
-  wagon: { label: 'Wagon', every: [17, 31], speed: 9.5 },
-  minivan: { label: 'Minivan', every: [19, 34], speed: 8.5 },
-  pickup: { label: 'Pickup', every: [20, 37], speed: 9 },
-  coupe: { label: 'Coupe', every: [24, 41], speed: 11 },
-  offroad: { label: 'Off-roader', every: [27, 48], speed: 8.5 },
-  sport: { label: 'Sports car', every: [34, 60], speed: 12 },
+  sedan: { label: 'Sedan', every: [10, 22], speed: 6.5 },
+  hatchback: { label: 'Hatchback', every: [12, 28], speed: 6.2 },
+  compact: { label: 'Compact', every: [18, 36], speed: 5.8 },
+  suv: { label: 'SUV', every: [21, 40], speed: 6.2 },
+  wagon: { label: 'Wagon', every: [26, 46], speed: 6.2 },
+  minivan: { label: 'Minivan', every: [28, 51], speed: 5.5 },
+  pickup: { label: 'Pickup', every: [30, 56], speed: 5.8 },
+  coupe: { label: 'Coupe', every: [36, 62], speed: 7.2 },
+  offroad: { label: 'Off-roader', every: [40, 72], speed: 5.5 },
+  sport: { label: 'Sports car', every: [51, 90], speed: 7.8 },
 }
 
 export const CAR_LENGTH = {
@@ -78,13 +81,13 @@ export const CAR_LENGTH = {
 
 // Default controller settings. Names follow the algorithm write-up.
 export const DEFAULT_TIMING = {
-  gMin: 8,
-  gMax: 45,
+  gMin: 10,
+  gMax: 60,
   yellow: 3,
   allRed: 1.5,
   gapThreshold: 2.5,
   extendStep: 3,
-  wMax: 90,
+  wMax: 120,
   switchThreshold: 5,
   startupLoss: 2,
   dischargeRate: 0.55,

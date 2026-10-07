@@ -275,7 +275,7 @@ export default function Hardware() {
           <section className="card card-wide">
             <h2 className="card-title">Green times</h2>
             <p className="card-note">
-              Used when the board runs its own cycle: Road 1 (North and South), then Road 2 (East and West), with{' '}
+              Used when the board runs its own cycle: each approach in turn, North, East, South, West, with{' '}
               {BOARD.yellow} s of yellow and {BOARD.allRed} s of all red between. Each green {BOARD.minGreen} to{' '}
               {BOARD.maxGreen} s.
             </p>

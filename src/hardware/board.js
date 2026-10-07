@@ -16,7 +16,7 @@ export const BOARD = {
 
 // The sketch numbers approaches 0 = North, 1 = East, 2 = South, 3 = West.
 // Each maps to the simulation lane whose cars arrive from that side, and to
-// that lane's phase: Road 1 (North and South) or Road 2 (East and West).
+// that lane's phase. Every approach has its own phase, numbered the same.
 export const APPROACHES = [
   { index: 0, key: 'north', label: 'North', red: 2, yellow: 3, green: 4, latch: 'A2' },
   { index: 1, key: 'east', label: 'East', red: 5, yellow: 6, green: 7, latch: 'A3' },
@@ -35,19 +35,17 @@ export function boardSignals(report, greens, now) {
   const left = Math.max(0, report.ms - (now - report.at))
   const yellow = BOARD.yellow * 1000
   const allRed = BOARD.allRed * 1000
+  const count = greens.length
+  // Time until the next phase in the rotation turns green.
+  const untilNext = report.stage === 'green' ? left + yellow + allRed : report.stage === 'yellow' ? left + allRed : left
   return APPROACHES.map((approach) => {
     const own = approach.phase === report.phase
-    let ms
-    let light = 'red'
-    if (report.stage === 'green') {
-      ms = own ? left : left + yellow + allRed
-      if (own) light = 'green'
-    } else if (report.stage === 'yellow') {
-      ms = own ? left : left + allRed
-      if (own) light = 'yellow'
-    } else {
-      ms = own ? left + greens[1 - report.phase] * 1000 + yellow + allRed : left
-    }
-    return { light, seconds: Math.ceil(ms / 1000) }
+    if (own && report.stage !== 'allred') return { light: report.stage, seconds: Math.ceil(left / 1000) }
+    // Phases are served in turn: add a full green, yellow and all red for
+    // every phase between the next one and this approach.
+    const steps = own ? count : (approach.phase - report.phase + count) % count
+    let ms = untilNext
+    for (let k = 1; k < steps; k++) ms += greens[(report.phase + k) % count] * 1000 + yellow + allRed
+    return { light: 'red', seconds: Math.ceil(ms / 1000) }
   })
 }

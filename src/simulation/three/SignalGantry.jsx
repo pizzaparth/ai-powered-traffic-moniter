@@ -41,36 +41,76 @@ function createBoard() {
   return { texture, draw }
 }
 
+// Soft round glow drawn around a lit lens, shared by every lamp.
+let haloTexture = null
+function getHaloTexture() {
+  if (haloTexture) return haloTexture
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 64
+  const context = canvas.getContext('2d')
+  const glow = context.createRadialGradient(32, 32, 0, 32, 32, 32)
+  glow.addColorStop(0, 'rgba(255,255,255,1)')
+  glow.addColorStop(0.35, 'rgba(255,255,255,0.45)')
+  glow.addColorStop(1, 'rgba(255,255,255,0)')
+  context.fillStyle = glow
+  context.fillRect(0, 0, 64, 64)
+  haloTexture = new THREE.CanvasTexture(canvas)
+  return haloTexture
+}
+
+// One three-lamp head. Like a real signal, exactly one lamp is lit at a
+// time and the amber is steady, never flashing: green, then amber, then red.
 function SignalHead({ x, phase }) {
-  const lampMaterials = useMemo(
+  const lamps = useMemo(
     () =>
       Object.fromEntries(
         Object.entries(LAMP_COLORS).map(([key, colors]) => [
           key,
-          new THREE.MeshBasicMaterial({ color: colors.off, toneMapped: false }),
+          {
+            lens: new THREE.MeshBasicMaterial({ color: colors.off, toneMapped: false }),
+            halo: new THREE.MeshBasicMaterial({
+              color: '#000000',
+              map: getHaloTexture(),
+              transparent: true,
+              opacity: 0.85,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+              toneMapped: false,
+            }),
+          },
         ]),
       ),
     [],
   )
+  useEffect(
+    () => () => {
+      for (const lamp of Object.values(lamps)) {
+        lamp.lens.dispose()
+        lamp.halo.dispose()
+      }
+    },
+    [lamps],
+  )
 
-  useFrame((state) => {
+  useFrame(() => {
     const signal = simulation.engine.controller.signalFor(phase)
-    // Amber flashes while the light is changing.
-    const flash = Math.floor(state.clock.elapsedTime * 4) % 2 === 0
-    const lit = {
-      red: signal === 'red',
-      amber: signal === 'yellow' && flash,
-      green: signal === 'green',
-    }
+    const lit = { red: signal === 'red', amber: signal === 'yellow', green: signal === 'green' }
     for (const key of Object.keys(LAMP_COLORS)) {
-      lampMaterials[key].color.set(lit[key] ? LAMP_COLORS[key].on : LAMP_COLORS[key].off)
+      lamps[key].lens.color.set(lit[key] ? LAMP_COLORS[key].on : LAMP_COLORS[key].off)
+      // Additive blending: a black halo adds nothing, so an unlit lamp has no glow.
+      lamps[key].halo.color.set(lit[key] ? LAMP_COLORS[key].on : '#000000')
     }
   })
 
   return Object.keys(LAMP_COLORS).map((key) => (
-    <mesh key={key} position={[x, GANTRY.lampY[key], GANTRY.lampZ]} material={lampMaterials[key]}>
-      <circleGeometry args={[GANTRY.lampRadius, 32]} />
-    </mesh>
+    <group key={key} position={[x, GANTRY.lampY[key], GANTRY.lampZ]}>
+      <mesh material={lamps[key].lens}>
+        <circleGeometry args={[GANTRY.lampRadius, 32]} />
+      </mesh>
+      <mesh position-z={0.6} material={lamps[key].halo}>
+        <planeGeometry args={[GANTRY.lampRadius * 4, GANTRY.lampRadius * 4]} />
+      </mesh>
+    </group>
   ))
 }
 
@@ -106,7 +146,7 @@ function CountdownBoard({ x, phase }) {
 }
 
 // Places the gantry so its pole stands at `pole` (x, z). `yaw` turns the
-// model so its heads (which face the model's +z) look at oncoming traffic.
+// model so its head (which faces the model's +z) look at oncoming traffic.
 export default function SignalGantry({ template, pole, yaw, phase }) {
   const model = useMemo(() => template.clone(), [template])
   const position = useMemo(() => {
@@ -117,11 +157,9 @@ export default function SignalGantry({ template, pole, yaw, phase }) {
   return (
     <group position={position} rotation-y={yaw} scale={SCALE}>
       <primitive object={model} />
-      {GANTRY.heads.map((x) => (
-        <SignalHead key={x} x={x} phase={phase} />
-      ))}
-      {/* One board per lane, beside the head that hangs over that lane. */}
-      <CountdownBoard x={GANTRY.heads[1] - 32} phase={phase} />
+      {/* One head per approach lane, hanging over that lane, with its countdown board beside it. */}
+      <SignalHead x={GANTRY.head} phase={phase} />
+      <CountdownBoard x={GANTRY.boardX} phase={phase} />
     </group>
   )
 }

@@ -15,10 +15,10 @@ export const useLogStore = create((set) => ({
   clear: () => set({ entries: [] }),
 }))
 
-// Board link settings. Green times are per phase (p1 = Road 1, p2 = Road 2),
+// Board link settings. Green times are per phase (p1-p4 = North, East, South, West),
 // used when the board runs its own cycle.
 export const DEFAULT_HARDWARE = {
-  greens: { p1: 10, p2: 10 },
+  greens: { p1: 20, p2: 20, p3: 20, p4: 20 },
   // Stream the simulation's signals to the board so it copies them live.
   mirror: true,
 }

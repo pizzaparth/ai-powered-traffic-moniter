@@ -16,7 +16,7 @@ import { AdaptiveController } from './controller.js'
 // unless something ahead (a car, a red light, a turn) forces it to slow. The
 // speed cap sqrt(2·b·gap) guarantees it can always stop before that thing.
 
-const PHASE_OF_ROAD = Object.fromEntries(PHASES.map((phase, index) => [phase.road, index]))
+const PHASE_OF_LANE = Object.fromEntries(PHASES.flatMap((phase, index) => phase.lanes.map((id) => [id, index])))
 const QUEUE_SPEED = 1 // below this a car counts as queued (m/s)
 const ARRIVAL_TAU = 30 // seconds of history in the arrival-rate estimate
 const ENTRY_CLEARANCE = 1 // free space needed at the lane entrance to spawn
@@ -115,7 +115,7 @@ export class SimulationEngine {
         type: next.type,
         lane: lane.id,
         road: lane.road,
-        phase: PHASE_OF_ROAD[lane.road],
+        phase: PHASE_OF_LANE[lane.id],
         route,
         length,
         s: length / 2,
@@ -182,6 +182,12 @@ export class SimulationEngine {
   // Inside the junction, or committed to entering it.
   occupiesJunction(car) {
     return car.committed && car.s - car.length / 2 < car.route.segments[2].start
+  }
+
+  // Some car is still inside the junction (or committed to entering it).
+  junctionBusy() {
+    for (const car of this.cars.values()) if (this.occupiesJunction(car)) return true
+    return false
   }
 
   // No car in the junction is on a path that crosses or merges with ours.
@@ -271,8 +277,12 @@ export class SimulationEngine {
           const signal = controller.signalFor(car.phase)
           const cannotStop = toStop < brakingDistance
           // A left turn that has been waiting at the line for a gap clears
-          // out on yellow, as drivers do once oncoming traffic stops.
-          const waitingToTurn = route.movement === 'left' && car.v < QUEUE_SPEED && toStop < 1.5
+          // out on yellow, as drivers do once oncoming traffic stops, but
+          // only while there is time to leave the junction before the other
+          // road gets green. Otherwise it waits for the next green.
+          const clearTime = (route.segments[1].length + car.length) / TURN_SPEED
+          const waitingToTurn =
+            route.movement === 'left' && car.v < QUEUE_SPEED && toStop < 1.5 && clearTime <= controller.timeToNextGreen()
           const allowed = signal === 'green' || (signal === 'yellow' && (cannotStop || waitingToTurn))
           if (allowed && !this.mustGiveWay(car) && this.pathClearFor(car) && this.exitClearFor(car, bySegment)) {
             car.committed = true
@@ -305,7 +315,7 @@ export class SimulationEngine {
       }
     }
 
-    controller.update(dt, this.time, this.sense())
+    controller.update(dt, this.time, this.sense(), this.junctionBusy())
     if (changed) this.emitCarsChange()
   }
 
@@ -321,7 +331,7 @@ export class SimulationEngine {
   laneView() {
     const sense = this.sense()
     return LANES.map((lane) => {
-      const phase = PHASE_OF_ROAD[lane.road]
+      const phase = PHASE_OF_LANE[lane.id]
       return {
         id: lane.id,
         label: lane.label,

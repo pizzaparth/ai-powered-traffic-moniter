@@ -1,23 +1,20 @@
 // ==========================================
 // 4-WAY ADAPTIVE TRAFFIC CONTROL SYSTEM
 // ==========================================
-// The lights run the same two phases as the web app's algorithm:
-//   Phase 0 = Road 1 (North and South approaches together)
-//   Phase 1 = Road 2 (East and West approaches together)
+// The lights run the same phases as the web app's algorithm: each approach
+// gets green on its own, in turn, so phase number = approach number:
+//   0 = North, 1 = East, 2 = South, 3 = West
 // Every change goes Green -> Yellow (3 s) -> All red (1.5 s) -> next Green.
 //
 // With the web app connected the board is in FOLLOW mode and copies the
 // app's lights and countdowns exactly. If the app goes quiet for 3 s the
-// board ends the current green safely and carries on in AUTO mode, cycling
-// the same two phases with fixed green times.
+// board ends the current green safely and carries on in AUTO mode, serving
+// the four approaches in turn with fixed green times.
 
 // --- LED Pin Assignments (index = approach: 0=North, 1=East, 2=South, 3=West) ---
 const int L_RED[4]    = {2, 5, 8, 11};
 const int L_YELLOW[4] = {3, 6, 9, 12};
 const int L_GREEN[4]  = {4, 7, 10, 13};
-
-// Phase that each approach belongs to.
-const int APPROACH_PHASE[4] = {0, 1, 0, 1};
 
 // --- 74HC595 Display Pins ---
 const int SCLK_PIN = A0;  // Shared Clock
@@ -37,14 +34,15 @@ const byte POS_TENS = 0x02;
 // --- Timings (must match DEFAULT_TIMING in src/simulation/config.js) ---
 const unsigned long YELLOW_MS  = 3000;
 const unsigned long ALL_RED_MS = 1500;
-int greenSeconds[2] = {10, 10}; // AUTO mode green per phase, 5-60 s
+const int PHASE_COUNT = 4;
+int greenSeconds[PHASE_COUNT] = {20, 20, 20, 20}; // AUTO mode green per approach, 5-60 s
 
 // --- Signal state ---
 enum Stage { STAGE_GREEN, STAGE_YELLOW, STAGE_ALL_RED };
 Stage stage = STAGE_GREEN;
 int activePhase = 0;            // Phase that is green/yellow, or that just ended (all red)
 unsigned long stageStart = 0;
-unsigned long stageLength = 10000;
+unsigned long stageLength = 20000;
 
 // --- Follow mode ---
 enum ControlMode { MODE_AUTO, MODE_FOLLOW };
@@ -57,14 +55,15 @@ int followCount[4] = {0, 0, 0, 0}; // -1 = blank display
 // Commands:
 //   L,<N>,<E>,<S>,<W>,<cN>,<cE>,<cS>,<cW>
 //        follow mode: light per approach (G, Y or R) and the number for each
-//        display (0-99, or - for blank); repeat at least every 3 s
-//   <G1,G2>   AUTO mode green seconds for Road 1 and Road 2 (5-60)
+//        display (0-99, or - for blank); repeat at least every 3 s.
+//        At most one approach may show green or yellow.
+//   <GN,GE,GS,GW>   AUTO mode green seconds for each approach (5-60)
 //   ?         report mode, stage and timings
 // Reports:
 //   READY,UNO_R4_MINIMA,2
 //   MODE,<AUTO|FOLLOW>
 //   PHASE,<phase>,<GREEN|YELLOW|ALLRED>,<ms left>   on every stage change
-//   TIMINGS,<G1>,<G2>
+//   TIMINGS,<GN>,<GE>,<GS>,<GW>
 //   ERR,<reason>
 const int SERIAL_BUFFER = 64;
 char serialBuffer[SERIAL_BUFFER];
@@ -122,22 +121,24 @@ int roundUpSeconds(unsigned long ms) {
 // countdown boards (AdaptiveController.countdown).
 int autoCountdown(int approach) {
   unsigned long left = stageRemaining();
-  bool own = APPROACH_PHASE[approach] == activePhase;
-  unsigned long ms;
-  if (stage == STAGE_GREEN) {
-    ms = own ? left : left + YELLOW_MS + ALL_RED_MS;
-  } else if (stage == STAGE_YELLOW) {
-    ms = own ? left : left + ALL_RED_MS;
-  } else {
-    // All red: the other phase is next; this one waits for it to run.
-    ms = own ? left + greenSeconds[1 - activePhase] * 1000UL + YELLOW_MS + ALL_RED_MS : left;
+  bool own = approach == activePhase;
+  if (own && stage != STAGE_ALL_RED) return roundUpSeconds(left);
+  // Time until the next approach in turn gets green.
+  unsigned long ms = left;
+  if (stage == STAGE_GREEN) ms += YELLOW_MS + ALL_RED_MS;
+  else if (stage == STAGE_YELLOW) ms += ALL_RED_MS;
+  // Add a full green, yellow and all red for every approach served before
+  // this one.
+  int steps = own ? PHASE_COUNT : (approach - activePhase + PHASE_COUNT) % PHASE_COUNT;
+  for (int k = 1; k < steps; k++) {
+    ms += greenSeconds[(activePhase + k) % PHASE_COUNT] * 1000UL + YELLOW_MS + ALL_RED_MS;
   }
   return roundUpSeconds(ms);
 }
 
 void applyAutoLights() {
   for (int i = 0; i < 4; i++) {
-    bool own = APPROACH_PHASE[i] == activePhase;
+    bool own = i == activePhase;
     if (own && stage == STAGE_GREEN) setLight(i, 'G');
     else if (own && stage == STAGE_YELLOW) setLight(i, 'Y');
     else setLight(i, 'R');
@@ -152,10 +153,12 @@ void reportPhase() {
 }
 
 void reportTimings() {
-  Serial.print("TIMINGS,");
-  Serial.print(greenSeconds[0]);
-  Serial.print(',');
-  Serial.println(greenSeconds[1]);
+  Serial.print("TIMINGS");
+  for (int i = 0; i < PHASE_COUNT; i++) {
+    Serial.print(',');
+    Serial.print(greenSeconds[i]);
+  }
+  Serial.println();
 }
 
 void reportMode() {
@@ -173,12 +176,12 @@ void startStage(Stage next, int phase) {
   reportPhase();
 }
 
-// AUTO mode: Green -> Yellow -> All red -> other phase Green.
+// AUTO mode: Green -> Yellow -> All red -> next approach Green.
 void advanceAuto() {
   if (stageRemaining() > 0) return;
   if (stage == STAGE_GREEN) startStage(STAGE_YELLOW, activePhase);
   else if (stage == STAGE_YELLOW) startStage(STAGE_ALL_RED, activePhase);
-  else startStage(STAGE_GREEN, 1 - activePhase);
+  else startStage(STAGE_GREEN, (activePhase + 1) % PHASE_COUNT);
 }
 
 // App went quiet: never jump straight to another green. A green still
@@ -190,16 +193,24 @@ void resumeAutoCycle() {
   else startStage(STAGE_YELLOW, activePhase);
 }
 
-// Apply a timing packet "<G1,G2>".
+// Apply a timing packet "<GN,GE,GS,GW>".
 void applyTimings(String packet) {
   packet = packet.substring(1, packet.length() - 1);
-  int comma = packet.indexOf(',');
-  if (comma < 0 || packet.indexOf(',', comma + 1) >= 0) {
-    Serial.println("ERR,Expected two values like <10,10>");
+  int values[PHASE_COUNT];
+  int count = 0;
+  int startIdx = 0;
+  for (int i = 0; i <= (int)packet.length(); i++) {
+    if (i == (int)packet.length() || packet.charAt(i) == ',') {
+      if (count < PHASE_COUNT) values[count] = constrain((int)packet.substring(startIdx, i).toInt(), 5, 60);
+      count++;
+      startIdx = i + 1;
+    }
+  }
+  if (count != PHASE_COUNT) {
+    Serial.println("ERR,Expected four values like <20,20,20,20>");
     return;
   }
-  greenSeconds[0] = constrain((int)packet.substring(0, comma).toInt(), 5, 60);
-  greenSeconds[1] = constrain((int)packet.substring(comma + 1).toInt(), 5, 60);
+  for (int i = 0; i < PHASE_COUNT; i++) greenSeconds[i] = values[i];
   Serial.println("ACK: Dynamic Timings Applied");
   reportTimings();
 }
@@ -222,7 +233,8 @@ void applyFrame(String line) {
   }
 
   char lights[4];
-  bool moving[2] = {false, false}; // phase has a green or yellow
+  int movingCount = 0; // approaches showing green or yellow
+  int movingApproach = -1;
   bool anyGreen = false;
   for (int i = 0; i < 4; i++) {
     if (fields[i] != "G" && fields[i] != "Y" && fields[i] != "R") {
@@ -230,11 +242,14 @@ void applyFrame(String line) {
       return;
     }
     lights[i] = fields[i].charAt(0);
-    if (lights[i] != 'R') moving[APPROACH_PHASE[i]] = true;
+    if (lights[i] != 'R') {
+      movingCount++;
+      movingApproach = i;
+    }
     if (lights[i] == 'G') anyGreen = true;
   }
-  // Safety: never show green or yellow on both roads at once.
-  if (moving[0] && moving[1]) {
+  // Safety: never show green or yellow on two approaches at once.
+  if (movingCount > 1) {
     Serial.println("ERR,Conflicting greens rejected");
     return;
   }
@@ -245,8 +260,8 @@ void applyFrame(String line) {
   }
 
   // Track the stage being shown so a fallback starts from the right place.
-  if (moving[0] || moving[1]) {
-    activePhase = moving[0] ? 0 : 1;
+  if (movingCount == 1) {
+    activePhase = movingApproach;
     stage = anyGreen ? STAGE_GREEN : STAGE_YELLOW;
   } else {
     stage = STAGE_ALL_RED;
@@ -314,7 +329,8 @@ void setup() {
   reportMode();
   reportTimings();
   // Start from all red so no green appears without warning after a reset.
-  startStage(STAGE_ALL_RED, 1);
+  // West is "last", so North is first to go green.
+  startStage(STAGE_ALL_RED, PHASE_COUNT - 1);
 }
 
 void loop() {

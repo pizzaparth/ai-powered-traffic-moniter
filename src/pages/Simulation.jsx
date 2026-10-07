@@ -134,7 +134,7 @@ export default function Simulation() {
       <header className="page-head">
         <div>
           <h1 className="page-title">Live junction</h1>
-          <p className="page-lede">Two roads, one lane each way. The signal gives green to the road that clears the most traffic.</p>
+          <p className="page-lede">Two roads, one lane each way. Each approach gets green in turn, longer when more cars wait.</p>
         </div>
         <Controls />
       </header>

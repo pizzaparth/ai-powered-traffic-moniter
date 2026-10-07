@@ -16,7 +16,7 @@ export const useBoardStore = create(() => ({
   mode: null, // 'auto' (own cycle) | 'follow' (copying the simulation)
   frame: null, // last frame sent: { lights: ['G', ...], counts: [12, ...] }
   phase: null, // { phase, stage, ms, at } while on its own cycle
-  timings: null, // [Road 1, Road 2] green seconds, as the board reports them
+  timings: null, // green seconds per phase (North, East, South, West), as the board reports them
   lastAck: null,
   lastSent: null,
   error: null,
@@ -174,7 +174,7 @@ if (typeof navigator !== 'undefined' && navigator.serial) {
   navigator.serial.addEventListener('disconnect', onUnplug)
 }
 
-// Green seconds for Road 1 and Road 2, used on the board's own cycle.
+// Green seconds per phase, used on the board's own cycle.
 export async function sendTimings(timings, source = 'user') {
   const values = timings.map((value) => Math.round(Math.min(BOARD.maxGreen, Math.max(BOARD.minGreen, value))))
   await send(`<${values.join(',')}>`)
@@ -183,15 +183,15 @@ export async function sendTimings(timings, source = 'user') {
   return values
 }
 
-// What the adaptive controller would give each road right now (§14: time
-// to clear the longest predicted queue on that road).
+// What the adaptive controller would give each approach right now (§14:
+// time to clear its predicted queue).
 export function adaptiveTimings() {
   const sense = simulation.engine.sense()
   return PHASES.map((phase) => Math.max(...phase.lanes.map((id) => simulation.engine.controller.laneGreen(sense[id]))))
 }
 
 // Follow mode: the board copies the simulation's signals. Each approach
-// takes its road's light and countdown. A frame goes out as soon as anything
+// takes its own phase's light and countdown. A frame goes out as soon as anything
 // changes and at least once a second, which also keeps the board from
 // timing out (3 s) and falling back to its own cycle.
 const KEEPALIVE_MS = 1000
